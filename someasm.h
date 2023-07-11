@@ -2,3 +2,5 @@
 
 
 class Some {};
+
+class Another {};
