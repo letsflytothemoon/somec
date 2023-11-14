@@ -74,6 +74,8 @@ public:
     
     struct StackStrat
     {
+        typedef Id int;
+        
         int Position(int id) const
         { return StackVarsCount() - id; }
         
@@ -118,6 +120,8 @@ public:
     
     struct StaticStrat
     {
+        typedef Id int;
+        
         static int Allocate()
         { return ASM::create_static_var(); }
         
@@ -159,24 +163,26 @@ public:
     
     
     
-    template <class Target>
+    template <class IdT = int>
     struct Ref
     {
-        static int Allocate() { throw "cannot be just created, its a reference you stupid"; }
+        typedef Id IdT;
         
-        static int Allocate(Target& target)
-        { return target.id; }//totally wrong
+        static Id Allocate() { throw "cannot be just created, its a reference you stupid"; }
         
-        static void Free(int) {}
+        static Id Allocate(Target& target)
+        { return target.Adress(); }//totally wrong
         
-        static RegVar Value(int id)
+        static void Free(const Id&) {}
+        
+        static RegVar Value(const Id& id)
         { return StoringStrat::Value(id); }
         
-        static void Set(int id, const RegVar& value)
+        static void Set(const Id& id, const RegVar& value)
         { StoringStrat::Set(id, value); }
     }
     
-    
+    template <class IdT
     
     
     
@@ -184,7 +190,7 @@ public:
     class Var
     {
         template <class T> friend class Ref;
-        int id;
+        StoringStrat::Id id;
     public:
         Var() : id(StoringStrat::Allocate())
         { }
