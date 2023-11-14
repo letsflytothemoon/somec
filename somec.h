@@ -26,11 +26,13 @@ public:
     struct RegVar
     {
         int regNum;
+        
         static int& RegVarsCount()
         {
             static int value;
             return value;
         }
+        
         static int Allocate()
         {
             int regNum = RegVarsCount()++ % COpts::REGS;
@@ -41,6 +43,7 @@ public:
             }
             return regNum;
         }
+        
         static void Free(int regNum)
         {
             if(regNum >= COpts::REGS)
@@ -50,12 +53,18 @@ public:
             }
             RegVarsCount()--;
         }
+        
         RegVar() : regNum(Allocate()) {}
+        
         RegVar(const RegVar& init) : regNum(Allocate())
         { mov_r_r(regNum, init.regNum); }
+        
         RegVar(int init) : regNum(Allocate())
         { ASM::mov_r_b(regNum, init); }
-        ~RegVar() { Free(regNum); }
+        
+        ~RegVar()
+        { Free(regNum); }
+        
         RegVar& operator =(const RegVar& value)
         {
             mov_r_r(regNum, value.regNum);
@@ -65,83 +74,123 @@ public:
     
     struct StackStrat
     {
-        int num;
-        int Position() const
-        { return StackVarsCount() - num; }
-        static int Allocate() { return StackVarsCount()++; }
-        static void Free() { StackVarsCount()--; } //m.b. some check
-        StackStrat() : num(Allocate())
-        { ASM::push_r(0); }
-        //StackStrat(const StackStrat& init) : num(Allocate())
-        //{
-        //    RegVar& regStrat(init);
-        //    ASM::push_r(init.regNum);
-        //}
-        ~StackStrat()
+        int Position(int id) const
+        { return StackVarsCount() - id; }
+        
+        static int Allocate()
         {
-            Free();
-            RegVar regStrat;
-            ASM::pop_r(regStrat.regNum);
+            ASM::push_r(0);
+            return StackVarsCount()++;
         }
-        StackStrat(const RegVar& init) : num(Allocate())
-        { ASM::push_r(init.regNum); }
-        operator RegVar() const
+        
+        static int Allocate(const RegVar& value)
+        {
+            ASM::push_r(value.regNum);
+            return StackVarsCount()++;
+        }
+        
+        static void Free(int)
+        {
+            //need to add pop instruction with no argument
+            //without storing to reg
+            RegVar regVar;
+            ASM::pop_r(regVar.regNum);
+            StackVarsCount()--;
+        }
+        
+        static RegVar Value(int id)
         {
             RegVar result;
-            ASM::mov_r_s(result.regNum, Position());
+            ASM::mov_r_s(result.regNum, Position(id));
             return result;
         }
-        void Set(const RegVar& value)
-        { ASM::mov_s_r(Position(), value.regNum); }
+        
+        static RegVar Address(int id)
+        {
+            RegVar result;
+            ASM::sp_to_r(result.regNum, id);
+            return result;
+        }
+        
+        static void Set(int id, const RegVar& value)
+        { ASM::mov_s_r(Position(id), value.regNum); }
     };
     
     struct StaticStrat
     {
-        int relAddress;
-        static int Allocate() { return ASM::create_static_var(); }
-        StaticStrat() : relAddress(Allocate()) {}
-        //StaticStrat(const StaticStrat& init) : relAddress(Allocate())
-        //{
-        //    RegVar regStrat;
-        //    ASM::mov_r_static_var_address(regStrat.regNum, init.relAddress);
-        //    ASM::mov_r_a(regStrat.regNum, regStrat.regNum);
-        //    RegVar address;
-        //    ASM::mov_r_static_var_address(address.regNum, relAddress);
-        //    ASM::mov_a_r(address.regNum, regStrat.regNum);
-        //}
-        StaticStrat(const RegVar& init) : relAddress(Allocate())
+        static int Allocate()
+        { return ASM::create_static_var(); }
+        
+        static int Allocate(const RegVar& value)
         {
+            int id = ASM::create_static_var();
             RegVar address;
-            ASM::mov_r_static_var_address(address.regNum, relAddress);
-            ASM::mov_a_r(address.regNum, init.regNum);
+            ASM::mov_r_static_var_address(address.regNum, id);
+            ASM::mov_a_r(address.regNum, value.regNum);
+            return id;
         }
-        operator RegVar() const
+        
+        static void Free(int)
+        {}
+        
+        static RegVar Value(int id)
         {
             RegVar result;
-            ASM::mov_r_static_var_address(result.regNum, relAddress);
+            ASM::mov_r_static_var_address(result.regNum, id);
             ASM::mov_r_a(result.regNum, result.regNum);
             return result;
         }
-        template <class T>
-        void Set(const T& value)
+        
+        static RegVar Address(int id)
         {
-            const RegVar& regVar(value);
+            RegVar result;
+            ASM::mov_r_static_var_address(result.regNum, id);
+            return result;
+        }
+        
+        void Set(int id, const RegVar& value)
+        {
             RegVar address;
-            ASM::mov_r_static_var_address(address.regNum, relAddress);
-            ASM::mov_a_r(address.regNum, regVar.regNum);
+            ASM::mov_r_static_var_address(address.regNum, id);
+            ASM::mov_a_r(address.regNum, value.regNum);
         }
     };
+    
+    
+    
+    
+    template <class Target>
+    struct Ref
+    {
+        static int Allocate() { throw "cannot be just created, its a reference you stupid"; }
+        
+        static int Allocate(Target& target)
+        { return target.id; }//totally wrong
+        
+        static void Free(int) {}
+        
+        static RegVar Value(int id)
+        { return StoringStrat::Value(id); }
+        
+        static void Set(int id, const RegVar& value)
+        { StoringStrat::Set(id, value); }
+    }
+    
+    
+    
+    
     
     template <class StoringStrat>
     class Var
     {
-        StoringStrat storingStrat;
+        template <class T> friend class Ref;
+        int id;
     public:
-        Var() { }
+        Var() : id(StoringStrat::Allocate())
+        { }
         
         Var(const Var<StoringStrat>& other) :
-        storingStrat((const RegVar&)other.storingStrat)
-        { }
+        storingStrat((const RegVar&)other)
         
         template <class T>
         Var(const T& init) :
